@@ -9,8 +9,11 @@ import tempfile
 import os
 import sys
 
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.append(PROJECT_ROOT)
 from utils.gradcam import predict_and_explain
+
+MODEL_PATH = os.path.join(PROJECT_ROOT, 'models', 'best_model.h5')
 
 # ── Page config ──────────────────────────────────────────────
 st.set_page_config(
@@ -35,10 +38,7 @@ CLASS_EMOJI = {
 
 @st.cache_resource
 def load_model():
-    model_path = os.path.join(
-        os.path.dirname(__file__), '..', 'models', 'efficientnet_phase1.h5'
-    )
-    return tf.keras.models.load_model(model_path)
+    return tf.keras.models.load_model(MODEL_PATH)
 
 st.sidebar.title("🛰️ Disaster Severity Assessment")
 st.sidebar.markdown("Upload an aerial image to classify the disaster type and visualize model attention.")
@@ -61,18 +61,17 @@ if uploaded_file is not None:
         tmp.write(uploaded_file.read())
         tmp_path = tmp.name
 
-    try:
-        model = load_model()
-    except Exception:
-        st.warning("⚠️ Model not found — using placeholder for UI demo.")
-        from tensorflow.keras import layers, models
-        from tensorflow.keras.applications import EfficientNetB0
-        base = EfficientNetB0(include_top=False, weights='imagenet', input_shape=(224,224,3))
-        x = layers.GlobalAveragePooling2D()(base.output)
-        x = layers.Dense(256, activation='relu')(x)
-        x = layers.Dropout(0.3)(x)
-        out = layers.Dense(4, activation='softmax')(x)
-        model = models.Model(base.input, out)
+    if not os.path.isfile(MODEL_PATH):
+        st.error(
+            f"Trained model not found at `{MODEL_PATH}`.\n\n"
+            "Train and save the model first by running "
+            "**notebooks/02_model_training.ipynb** to completion — "
+            "its final cell promotes the best variant to "
+            "`models/best_model.h5`, which this app loads."
+        )
+        st.stop()
+
+    model = load_model()
 
     with st.spinner("Analyzing image..."):
         result = predict_and_explain(model, tmp_path)
