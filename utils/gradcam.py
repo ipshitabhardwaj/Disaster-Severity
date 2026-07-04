@@ -126,7 +126,7 @@ def get_gradcam_heatmap(
     Args:
         model: Loaded Keras classifier.
         img_array: Preprocessed image, shape (1, H, W, 3) or (H, W, 3),
-            pixel values in [0, 1] (see `utils/predict.preprocess_image`).
+            EfficientNet-preprocessed (see `utils/predict.preprocess_image`).
         class_idx: Index into `CLASS_NAMES` to explain.
         layer_name: Conv layer to target. Auto-detected via
             `get_last_conv_layer_name` when None.
@@ -169,7 +169,7 @@ def get_gradcam_plus_plus_heatmap(
     Args:
         model: Loaded Keras classifier.
         img_array: Preprocessed image, shape (1, H, W, 3) or (H, W, 3),
-            pixel values in [0, 1].
+            EfficientNet-preprocessed.
         class_idx: Index into `CLASS_NAMES` to explain.
         layer_name: Conv layer to target. Auto-detected via
             `get_last_conv_layer_name` when None.
@@ -282,7 +282,7 @@ def compute_average_drop(
     Args:
         model: Loaded Keras classifier.
         img_array: Preprocessed image, shape (1, H, W, 3) or (H, W, 3),
-            pixel values in [0, 1].
+            EfficientNet-preprocessed.
         class_idx: Class index the heatmap was computed for.
         heatmap: 2D array in [0, 1], any size (will be resized to match
             `img_array`).
@@ -328,7 +328,7 @@ def predict_and_explain(model: tf.keras.Model, image_path: str) -> Dict[str, obj
     class_label, confidence_dict = predict(model, img_array)
     class_idx = CLASS_NAMES.index(class_label)
 
-    original_uint8 = np.uint8(np.clip(img_array[0], 0, 1) * 255)
+    original_uint8 = np.uint8(np.clip(img_array[0], 0, 255))
 
     heatmap = get_gradcam_heatmap(model, img_array, class_idx)
     heatmap_pp = get_gradcam_plus_plus_heatmap(model, img_array, class_idx)
@@ -369,7 +369,7 @@ def generate_gradcam_gallery(
     """Generate a Grad-CAM / Grad-CAM++ comparison gallery for a test set.
 
     Picks up to `n_per_class` images per class from `test_ds` (a batched,
-    normalized-to-[0,1], categorical-label dataset — see
+    EfficientNet-preprocessed, categorical-label dataset — see
     `notebooks/02_model_training.ipynb`'s `make_dataset`), renders a
     side-by-side (Original | Grad-CAM | Grad-CAM++) figure for each, and
     saves them to `output_dir/gradcam_gallery/`.
@@ -410,7 +410,7 @@ def generate_gradcam_gallery(
             heatmap = get_gradcam_heatmap(model, img_batch, cls_idx)
             heatmap_pp = get_gradcam_plus_plus_heatmap(model, img_batch, cls_idx)
 
-            original_uint8 = np.uint8(np.clip(img, 0, 1) * 255)
+            original_uint8 = np.uint8(np.clip(img, 0, 255))
             _, overlay_rgb = overlay_heatmap(heatmap, original_uint8)
             _, overlay_pp_rgb = overlay_heatmap(heatmap_pp, original_uint8)
 
