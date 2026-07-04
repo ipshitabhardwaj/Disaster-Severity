@@ -3,8 +3,8 @@
 Single source of truth for how to load a trained model and how to prepare an
 image for it. `app/app.py` (Streamlit UI) and `utils/gradcam.py` (visual
 explanations) both import from here so preprocessing stays in lock-step with
-training. The training pipeline (`notebooks/02_model_training.ipynb`) rescales
-pixels to [0, 1]; this module matches that exactly.
+training. The training pipeline (`notebooks/02_model_training.ipynb`) uses
+EfficientNet's own `preprocess_input`; this module matches that exactly.
 """
 
 from __future__ import annotations
@@ -14,6 +14,7 @@ from typing import Dict, Tuple, Union
 import numpy as np
 import tensorflow as tf
 from PIL import Image
+from tensorflow.keras.applications.efficientnet import preprocess_input
 
 # Class ordering must match the order used at training time
 # (`class_names=CLASS_NAMES` in `image_dataset_from_directory`). Reordering
@@ -45,7 +46,7 @@ def preprocess_image(
     Steps:
         1. Open with PIL and convert to RGB (drops alpha / handles grayscale).
         2. Resize to the model's expected input size.
-        3. Rescale pixel values from [0, 255] to [0, 1] — matches training.
+        3. Apply EfficientNet's `preprocess_input` — matches training.
         4. Add a leading batch dimension.
 
     Args:
@@ -53,11 +54,11 @@ def preprocess_image(
         target_size: (height, width) the model expects. Default (224, 224).
 
     Returns:
-        A float32 array of shape (1, H, W, 3), pixel values in [0, 1].
+        A float32 array of shape (1, H, W, 3), preprocessed for EfficientNet.
     """
     with Image.open(img_path) as raw:
         img = raw.convert("RGB").resize(target_size)
-    arr = np.asarray(img, dtype=np.float32) / 255.0
+    arr = preprocess_input(np.asarray(img, dtype=np.float32))
     return np.expand_dims(arr, axis=0)
 
 
@@ -75,7 +76,7 @@ def predict(
     Args:
         model: Loaded Keras classifier (output shape (1, 4), softmax).
         img_array: Preprocessed input from `preprocess_image()` —
-            shape (1, H, W, 3), pixel values in [0, 1]. A bare (H, W, 3)
+            shape (1, H, W, 3), EfficientNet-preprocessed. A bare (H, W, 3)
             array is also accepted and promoted to a batch of one.
 
     Returns:

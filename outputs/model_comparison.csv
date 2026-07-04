@@ -1,0 +1,4 @@
+Model,Params,Input size,Best val acc,Macro F1
+EfficientNetB0,5.3M,224x224,0.9694,0.9600
+EfficientNetB1,7.8M,240x240,N/A,N/A
+EfficientNetB3,12M,300x300,N/A,N/A
