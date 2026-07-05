@@ -1,0 +1,5 @@
+,gradcam_avg_drop,gradcam_pp_avg_drop,n_images
+Earthquake,36.29938387107759,28.945643794838862,5.0
+Fire,0.0,0.0,0.0
+Flood,0.0,51.91642567221029,5.0
+Normal,7.391453715389254,0.0,5.0
