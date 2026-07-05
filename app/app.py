@@ -1,92 +1,222 @@
+"""Project 43 — Explainable Disaster Severity Assessment (Streamlit dashboard).
 
-import streamlit as st
-import tensorflow as tf
-import numpy as np
-import plotly.graph_objects as go
-import glob
-import tempfile
+An aerial-image classifier (EfficientNetB0) with Grad-CAM / Grad-CAM++
+explanations, a tile-based Zone Damage Map, a PDF report export, and a model
+performance dashboard. Paths are anchored via `find_project_root()` (from
+`utils/gradcam.py`) so nothing is hardcoded.
+"""
+
+import io
 import os
 import sys
+import tempfile
 
-PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-sys.path.append(PROJECT_ROOT)
-from utils.gradcam import predict_and_explain
+import numpy as np
+import plotly.graph_objects as go
+import streamlit as st
+import tensorflow as tf
+from PIL import Image
+
+# ── Bootstrap project root onto sys.path, then use the shared root finder ──
+_HERE = os.path.dirname(os.path.abspath(__file__))
+if os.path.dirname(_HERE) not in sys.path:
+    sys.path.insert(0, os.path.dirname(_HERE))
+
+from utils.gradcam import find_project_root, predict_and_explain
 from utils.predict import CLASS_NAMES as PREDICT_CLASS_NAMES
+from utils.zonemap import CLASS_COLORS, zone_damage_map
+from utils.report import build_report_pdf
 
-MODEL_PATH = os.path.join(PROJECT_ROOT, 'models', 'best_model.h5')
-TEST_DIR = os.path.join(PROJECT_ROOT, 'data', 'Test')
+PROJECT_ROOT = str(find_project_root("data"))
+MODEL_PATH = os.path.join(PROJECT_ROOT, "models", "best_model.h5")
+TEST_DIR = os.path.join(PROJECT_ROOT, "data", "Test")
+OUT_DIR = os.path.join(PROJECT_ROOT, "outputs")
 
-# ── Page config ──────────────────────────────────────────────
+CLASS_NAMES = list(PREDICT_CLASS_NAMES)
+CLASS_EMOJI = {"Earthquake": "🏚️", "Fire": "🔥", "Flood": "🌊", "Normal": "✅"}
+
+# ── Page config ─────────────────────────────────────────────────────────
 st.set_page_config(
     page_title="Disaster Severity Assessment",
     page_icon="🛰️",
-    layout="wide"
+    layout="wide",
+    initial_sidebar_state="expanded",
 )
 
-CLASS_NAMES = list(PREDICT_CLASS_NAMES)
-CLASS_COLORS = {
-    'Earthquake': '#e74c3c',
-    'Fire':       '#e67e22',
-    'Flood':      '#3498db',
-    'Normal':     '#2ecc71'
+# ── Custom CSS ──────────────────────────────────────────────────────────
+CUSTOM_CSS = """
+<style>
+:root {
+  --eq: #E24B4A; --fire: #EF9F27; --flood: #378ADD; --normal: #1D9E75;
 }
-CLASS_EMOJI = {
-    'Earthquake': '🏚️',
-    'Fire':       '🔥',
-    'Flood':      '🌊',
-    'Normal':     '✅'
+.block-container { padding-top: 1.2rem; max-width: 1300px; }
+
+/* Gradient header banner */
+.hero {
+  background: linear-gradient(120deg, #10203f 0%, #1c3a63 45%, #2a5c8f 100%);
+  border-radius: 16px; padding: 22px 28px; margin-bottom: 18px;
+  border: 1px solid rgba(255,255,255,0.08);
+  box-shadow: 0 8px 30px rgba(0,0,0,0.35);
+}
+.hero h1 { color: #ffffff; margin: 0; font-size: 1.9rem; font-weight: 800;
+  letter-spacing: 0.3px; }
+.hero p { color: #b9c6da; margin: 4px 0 0 0; font-size: 0.95rem; }
+.hero .badges { margin-top: 12px; }
+.hero .pill {
+  display: inline-block; background: rgba(255,255,255,0.10);
+  border: 1px solid rgba(255,255,255,0.18); color: #eaf1fb;
+  padding: 5px 12px; border-radius: 999px; font-size: 0.8rem;
+  margin-right: 8px; font-weight: 600;
 }
 
+/* Card containers */
+.card {
+  background: #161B25; border: 1px solid #262d3a; border-radius: 14px;
+  padding: 18px 20px; box-shadow: 0 4px 18px rgba(0,0,0,0.28);
+  margin-bottom: 14px;
+}
+.card h3 { margin-top: 0; }
 
-def confidence_color(prob):
+/* Severity badge */
+.sev-badge {
+  display: flex; align-items: center; gap: 12px;
+  border-radius: 12px; padding: 16px 20px; margin: 4px 0 14px 0;
+  color: #fff; font-weight: 800;
+}
+.sev-badge .emoji { font-size: 2.2rem; }
+.sev-badge .label { font-size: 1.7rem; line-height: 1.1; }
+.sev-badge .sub { font-size: 0.85rem; font-weight: 500; opacity: 0.9; }
+
+/* Animated confidence meter */
+.meter-wrap { background:#0e1117; border:1px solid #262d3a; border-radius:999px;
+  height: 26px; width: 100%; overflow: hidden; margin: 6px 0 2px 0; }
+.meter-fill { height: 100%; border-radius: 999px; text-align: right;
+  color: #fff; font-weight: 700; font-size: 0.8rem; line-height: 26px;
+  padding-right: 10px; white-space: nowrap;
+  animation: growbar 0.9s cubic-bezier(.22,.61,.36,1) forwards; }
+@keyframes growbar { from { width: 0%; } }
+
+/* Metric cards */
+.metric-card {
+  background: #161B25; border: 1px solid #262d3a; border-radius: 14px;
+  padding: 16px 18px; text-align: center; height: 100%;
+}
+.metric-card .val { font-size: 1.7rem; font-weight: 800; color: #eaf1fb; }
+.metric-card .lbl { font-size: 0.8rem; color: #8b97a8; margin-top: 2px;
+  text-transform: uppercase; letter-spacing: 0.5px; }
+
+/* Sample image buttons -> card-like with hover lift */
+section[data-testid="stSidebar"] div.stButton > button {
+  border-radius: 10px; border: 1px solid #2c3442; background: #1a212e;
+  font-weight: 600; transition: all 0.15s ease-in-out; padding: 10px 6px;
+}
+section[data-testid="stSidebar"] div.stButton > button:hover {
+  transform: translateY(-2px); border-color: #5B8DEF;
+  box-shadow: 0 6px 16px rgba(91,141,239,0.25);
+}
+
+.legend-row { display:flex; align-items:center; gap:8px; margin: 3px 0; }
+.legend-swatch { width:16px; height:16px; border-radius:4px; display:inline-block; }
+.explain { color:#8b97a8; font-size:0.85rem; }
+</style>
+"""
+st.markdown(CUSTOM_CSS, unsafe_allow_html=True)
+
+
+def confidence_color(prob: float) -> str:
     """Green >80%, yellow 60-80%, red <60%."""
     if prob > 0.80:
-        return '#2ecc71'
+        return "#1D9E75"
     if prob >= 0.60:
-        return '#f1c40f'
-    return '#e74c3c'
+        return "#EAB308"
+    return "#E24B4A"
 
 
-@st.cache_resource
+def severity_badge_html(pred_class: str, confidence: float) -> str:
+    color = CLASS_COLORS.get(pred_class, "#5B8DEF")
+    emoji = CLASS_EMOJI.get(pred_class, "❓")
+    return f"""
+    <div class="sev-badge" style="background: linear-gradient(120deg, {color} 0%, {color}cc 100%);">
+        <div class="emoji">{emoji}</div>
+        <div>
+            <div class="label">{pred_class}</div>
+            <div class="sub">Predicted disaster class &middot; {confidence:.1%} confidence</div>
+        </div>
+    </div>"""
+
+
+def confidence_meter_html(confidence: float) -> str:
+    color = confidence_color(confidence)
+    pct = max(4.0, confidence * 100.0)  # keep a sliver visible even at ~0
+    return f"""
+    <div class="meter-wrap">
+        <div class="meter-fill" style="width:{pct:.1f}%; background:{color};">
+            {confidence:.1%}
+        </div>
+    </div>"""
+
+
+@st.cache_resource(show_spinner=False)
 def load_model():
     return tf.keras.models.load_model(MODEL_PATH)
 
 
 def get_model_variant(model):
-    """Guess EfficientNet variant from input resolution."""
     h, w = model.input_shape[1:3]
-    size_map = {224: 'B0', 240: 'B1', 300: 'B3'}
-    variant = size_map.get(h, f'Custom ({h}x{w})')
-    return variant, (h, w)
+    size_map = {224: "B0", 240: "B1", 300: "B3"}
+    return size_map.get(h, f"Custom ({h}x{w})"), (h, w)
 
 
-@st.cache_data
-def get_sample_image(class_name):
-    """First available test image for `class_name`, or None."""
-    files = (glob.glob(os.path.join(TEST_DIR, class_name, '*.jpg')) +
-             glob.glob(os.path.join(TEST_DIR, class_name, '*.jpeg')) +
-             glob.glob(os.path.join(TEST_DIR, class_name, '*.png')))
-    return files[0] if files else None
+@st.cache_data(show_spinner=False)
+def get_sample_bytes(class_name):
+    """Bytes of the first available test image for `class_name`, or None."""
+    import glob
+    files = (glob.glob(os.path.join(TEST_DIR, class_name, "*.jpg")) +
+             glob.glob(os.path.join(TEST_DIR, class_name, "*.jpeg")) +
+             glob.glob(os.path.join(TEST_DIR, class_name, "*.png")))
+    if not files:
+        return None
+    with open(files[0], "rb") as f:
+        return f.read()
 
 
-st.sidebar.title("🛰️ Disaster Severity Assessment")
-st.sidebar.markdown("Upload an aerial image to classify the disaster type and visualize model attention.")
-st.sidebar.markdown("---")
-st.sidebar.markdown("**Classes:**")
-for cls, emoji in CLASS_EMOJI.items():
-    st.sidebar.markdown(f"{emoji} {cls}")
+@st.cache_data(show_spinner=False)
+def analyze_bytes(image_bytes: bytes):
+    """Run predict + Grad-CAM for raw image bytes (cached on the bytes)."""
+    model = load_model()
+    with tempfile.NamedTemporaryFile(delete=False, suffix=".png") as tmp:
+        tmp.write(image_bytes)
+        tmp_path = tmp.name
+    try:
+        return predict_and_explain(model, tmp_path)
+    finally:
+        os.unlink(tmp_path)
 
-st.title("🛰️ Disaster Severity Assessment")
-st.markdown("Powered by **EfficientNet** + **Grad-CAM** | AIDERv2 Dataset")
-st.markdown("---")
 
+# ── Header ──────────────────────────────────────────────────────────────
+st.markdown(
+    """
+    <div class="hero">
+        <h1>🛰️ Disaster Severity Assessment</h1>
+        <p>Explainable aerial-image disaster classification &mdash; Team Anuksha &middot; Rishika &middot; Ipshita &middot; C-DAC Mohali</p>
+        <div class="badges">
+            <span class="pill">97% Test Accuracy</span>
+            <span class="pill">AIDERv2</span>
+            <span class="pill">EfficientNetB0</span>
+            <span class="pill">Grad-CAM + Grad-CAM++</span>
+        </div>
+    </div>
+    """,
+    unsafe_allow_html=True,
+)
+
+# ── Fail gracefully if the model is missing ─────────────────────────────
 if not os.path.isfile(MODEL_PATH):
     st.error(
         f"Trained model not found at `{MODEL_PATH}`.\n\n"
-        "Train and save the model first by running "
-        "**notebooks/02_model_training.ipynb** to completion — "
-        "its final cell promotes the best variant to "
-        "`models/best_model.h5`, which this app loads."
+        "Run **notebooks/02_model_training.ipynb** to completion — its final "
+        "cell promotes the best variant to `models/best_model.h5`, which this "
+        "app loads."
     )
     st.stop()
 
@@ -94,112 +224,313 @@ model = load_model()
 variant, input_size = get_model_variant(model)
 num_params = model.count_params()
 
-# ── Sidebar: model info ─────────────────────────────────────
-st.sidebar.markdown("---")
-st.sidebar.markdown("**Model info:**")
-st.sidebar.markdown(f"- Variant: **EfficientNet{variant}**")
-st.sidebar.markdown(f"- Parameters: **{num_params:,}**")
-st.sidebar.markdown(f"- Input size: **{input_size[0]}×{input_size[1]}**")
+# ── Session state ───────────────────────────────────────────────────────
+if "image_bytes" not in st.session_state:
+    st.session_state.image_bytes = None
+    st.session_state.image_name = None
 
-# ── Sidebar: confidence threshold ───────────────────────────
-st.sidebar.markdown("---")
-st.sidebar.markdown("**Review threshold:**")
-confidence_threshold = st.sidebar.slider(
-    "Warn below this confidence",
-    min_value=0.40, max_value=0.80, value=0.60, step=0.05,
-    format="%.0f%%",
-)
+# ── Sidebar ─────────────────────────────────────────────────────────────
+with st.sidebar:
+    st.markdown("### 🛰️ Control Panel")
 
-# ── Sidebar: sample images ──────────────────────────────────
-st.sidebar.markdown("---")
-st.sidebar.markdown("**Try a sample image:**")
-
-if 'selected_image_path' not in st.session_state:
-    st.session_state.selected_image_path = None
-
-sample_cols = st.sidebar.columns(2)
-for i, cls in enumerate(CLASS_NAMES):
-    col = sample_cols[i % 2]
-    if col.button(f"{CLASS_EMOJI[cls]} {cls}", key=f"sample_{cls}", use_container_width=True):
-        sample_path = get_sample_image(cls)
-        if sample_path:
-            st.session_state.selected_image_path = sample_path
-        else:
-            st.sidebar.warning(f"No sample image found for {cls}.")
-
-uploaded_file = st.file_uploader(
-    "Upload an aerial image (PNG/JPG)",
-    type=["png", "jpg", "jpeg"]
-)
-
-image_path = None
-if uploaded_file is not None:
-    with tempfile.NamedTemporaryFile(delete=False, suffix='.png') as tmp:
-        tmp.write(uploaded_file.read())
-        image_path = tmp.name
-elif st.session_state.selected_image_path:
-    image_path = st.session_state.selected_image_path
-    st.caption(f"Showing sample image: `{os.path.basename(image_path)}`")
-
-if image_path is not None:
-    with st.spinner("Analyzing image..."):
-        result = predict_and_explain(model, image_path)
-
-    col1, col2, col3 = st.columns(3)
-
-    with col1:
-        st.subheader("📷 Original Image")
-        st.image(result['original'], use_container_width=True)
-
-    with col2:
-        st.subheader("🔥 Grad-CAM Overlay")
-        st.image(result['overlay'], use_container_width=True)
-
-    with col3:
-        st.subheader("🔀 Grad-CAM++ Overlay")
-        st.image(result['overlay_plus_plus'], use_container_width=True)
-
-    st.markdown("---")
-
-    pred_class = result['class']
-    confidence = result['confidence']
-    color = CLASS_COLORS[pred_class]
-    emoji = CLASS_EMOJI[pred_class]
-
-    st.markdown(f"""
-    <div style='background-color:{color}22; border-left: 5px solid {color};
-    padding: 16px; border-radius: 8px;'>
-        <h2 style='color:{color}'>{emoji} Predicted: {pred_class}</h2>
-        <h3>Confidence: {confidence:.2%}</h3>
-    </div>
-    """, unsafe_allow_html=True)
-
-    if confidence < confidence_threshold:
-        st.warning("⚠️ Low confidence — human review recommended")
-
-    st.markdown("---")
-
-    st.subheader("📊 Class Probabilities")
-    probs = result['all_probs']
-    bar_colors = [confidence_color(v) for v in probs.values()]
-    fig = go.Figure(go.Bar(
-        x=list(probs.values()),
-        y=list(probs.keys()),
-        orientation='h',
-        marker_color=bar_colors,
-        text=[f"{v:.2%}" for v in probs.values()],
-        textposition='outside'
-    ))
-    fig.update_layout(
-        xaxis=dict(range=[0, 1], tickformat='.0%'),
-        height=300,
-        margin=dict(t=20, b=20),
+    st.markdown(
+        f"""
+        <div class="card" style="padding:14px 16px;">
+            <div style="font-weight:700; margin-bottom:6px;">Model</div>
+            <div class="explain">Variant &nbsp;<b style="color:#eaf1fb;">EfficientNet{variant}</b></div>
+            <div class="explain">Params &nbsp;<b style="color:#eaf1fb;">{num_params:,}</b></div>
+            <div class="explain">Input &nbsp;<b style="color:#eaf1fb;">{input_size[0]}×{input_size[1]}</b></div>
+            <div class="explain">Val acc &nbsp;<b style="color:#1D9E75;">96.94%</b></div>
+        </div>
+        """,
+        unsafe_allow_html=True,
     )
-    st.plotly_chart(fig, use_container_width=True)
-    st.caption("🟢 >80% confident · 🟡 60–80% · 🔴 <60%")
 
-    if uploaded_file is not None:
-        os.unlink(image_path)
+    st.markdown("**Try a sample image**")
+    sample_cols = st.columns(2)
+    for i, cls in enumerate(CLASS_NAMES):
+        col = sample_cols[i % 2]
+        if col.button(f"{CLASS_EMOJI[cls]} {cls}", key=f"sample_{cls}", width="stretch"):
+            b = get_sample_bytes(cls)
+            if b:
+                st.session_state.image_bytes = b
+                st.session_state.image_name = f"sample_{cls}.jpg"
+            else:
+                st.warning(f"No sample image found for {cls}.")
 
-else:
-    st.info("👆 Upload an aerial disaster image, or pick a sample from the sidebar, to get started.")
+    st.markdown("---")
+    st.markdown("**Review threshold**")
+    confidence_threshold = st.slider(
+        "Warn below this confidence", min_value=0.40, max_value=0.90,
+        value=0.60, step=0.05, format="%.0f%%",
+    )
+    thr_color = confidence_color(confidence_threshold)
+    st.markdown(
+        f'<div class="explain">Predictions under '
+        f'<b style="color:{thr_color};">{confidence_threshold:.0%}</b> are flagged '
+        "for human review.</div>",
+        unsafe_allow_html=True,
+    )
+
+    st.markdown("---")
+    with st.expander("ℹ️ About this project"):
+        st.markdown(
+            "This dashboard classifies aerial imagery into **Earthquake, Fire, "
+            "Flood, or Normal** using an EfficientNetB0 transfer-learning model "
+            "trained on the **AIDERv2** dataset.\n\n"
+            "Predictions are made explainable with **Grad-CAM** and "
+            "**Grad-CAM++** heatmaps, quantified by an **Average Drop %** "
+            "faithfulness metric. The **Zone Analysis** tab tiles large images "
+            "to localize damage, and every analysis can be exported to a "
+            "**PDF report**.\n\n"
+            "_C-DAC Mohali — ML to Generative AI & LLMs._"
+        )
+
+# ── Uploader (shared across tabs) ───────────────────────────────────────
+uploaded_file = st.file_uploader(
+    "Upload an aerial image (PNG/JPG) — or pick a sample from the sidebar",
+    type=["png", "jpg", "jpeg"],
+)
+if uploaded_file is not None:
+    st.session_state.image_bytes = uploaded_file.getvalue()
+    st.session_state.image_name = uploaded_file.name
+
+image_bytes = st.session_state.image_bytes
+
+tab_analyze, tab_zone, tab_perf = st.tabs(
+    ["🔎 Analyze", "🗺️ Zone Analysis", "📊 Model Performance"]
+)
+
+# ════════════════════════════════════════════════════════════════════════
+# TAB 1 — ANALYZE
+# ════════════════════════════════════════════════════════════════════════
+with tab_analyze:
+    if image_bytes is None:
+        st.info("👆 Upload an aerial disaster image, or pick a sample from the sidebar, to get started.")
+    else:
+        try:
+            with st.spinner("Analyzing image…"):
+                result = analyze_bytes(image_bytes)
+        except Exception as exc:  # pragma: no cover - defensive UI guard
+            st.error(f"Could not analyze this image: {exc}")
+            result = None
+
+        if result is not None:
+            pred_class = result["class"]
+            confidence = result["confidence"]
+
+            left, right = st.columns([1, 1.15])
+
+            with left:
+                st.markdown("#### 📷 Input")
+                st.image(result["original"], width="stretch",
+                         caption=st.session_state.image_name or "uploaded image")
+
+            with right:
+                st.markdown("#### 🧭 Prediction")
+                st.markdown(severity_badge_html(pred_class, confidence), unsafe_allow_html=True)
+                st.markdown("**Confidence**")
+                st.markdown(confidence_meter_html(confidence), unsafe_allow_html=True)
+
+                if confidence < confidence_threshold:
+                    st.warning("⚠️ Low confidence — human review recommended.")
+                else:
+                    st.success("✅ Confident prediction.")
+
+                probs = result["all_probs"]
+                bar_colors = [CLASS_COLORS.get(k, "#5B8DEF") for k in probs.keys()]
+                fig = go.Figure(go.Bar(
+                    x=list(probs.values()), y=list(probs.keys()), orientation="h",
+                    marker_color=bar_colors,
+                    text=[f"{v:.1%}" for v in probs.values()], textposition="outside",
+                ))
+                fig.update_layout(
+                    template="plotly_dark", xaxis=dict(range=[0, 1.05], tickformat=".0%"),
+                    height=230, margin=dict(t=10, b=10, l=10, r=10),
+                    paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
+                )
+                st.plotly_chart(fig, width="stretch")
+
+            st.markdown("---")
+            st.markdown("#### 🔥 Explainability — where the model looked")
+            st.markdown(
+                '<div class="explain">Grad-CAM highlights the pixels that most '
+                "drove the prediction (red = high influence). Grad-CAM++ refines "
+                "this when evidence is spread across several regions of the frame.</div>",
+                unsafe_allow_html=True,
+            )
+            g1, g2, g3 = st.columns(3)
+            with g1:
+                st.markdown("**Original**")
+                st.image(result["original"], width="stretch")
+            with g2:
+                st.markdown(f"**Grad-CAM** · {result['average_drop']:.1f}% avg drop")
+                st.image(result["overlay"], width="stretch")
+            with g3:
+                st.markdown(f"**Grad-CAM++** · {result['average_drop_plus_plus']:.1f}% avg drop")
+                st.image(result["overlay_plus_plus"], width="stretch")
+
+            # ── PDF report export ──────────────────────────────────────
+            st.markdown("---")
+            try:
+                pdf_bytes = build_report_pdf(
+                    original_img=result["original"],
+                    gradcam_img=result["overlay"],
+                    pred_class=pred_class,
+                    confidence=confidence,
+                    all_probs=result["all_probs"],
+                    average_drop=result["average_drop"],
+                    model_info=f"EfficientNet{variant} ({num_params:,} params, "
+                               f"{input_size[0]}x{input_size[1]})  |  96.94% val accuracy",
+                )
+                st.download_button(
+                    "📄 Download PDF Report", data=pdf_bytes,
+                    file_name="disaster_assessment_report.pdf", mime="application/pdf",
+                    width="stretch",
+                )
+            except Exception as exc:  # pragma: no cover - defensive UI guard
+                st.info(f"PDF export unavailable: {exc}")
+
+# ════════════════════════════════════════════════════════════════════════
+# TAB 2 — ZONE ANALYSIS
+# ════════════════════════════════════════════════════════════════════════
+with tab_zone:
+    st.markdown("#### 🗺️ Zone Damage Map")
+    st.markdown(
+        '<div class="explain">Large aerial images are tiled into 224×224 patches '
+        "(sliding window, stride 224). Each patch is classified independently and "
+        "tinted by its predicted class, so you can see <b>where</b> damage is "
+        "concentrated. Normal-sized images resolve to a single zone.</div>",
+        unsafe_allow_html=True,
+    )
+    st.markdown("")
+
+    if image_bytes is None:
+        st.info("Pick or upload an image first (sidebar sample or the uploader above).")
+    else:
+        run_zone = st.button("▶️ Run zone analysis", width="stretch")
+        if run_zone:
+            try:
+                pil_img = Image.open(io.BytesIO(image_bytes)).convert("RGB")
+                with st.spinner("Tiling and classifying zones…"):
+                    overlay, stats = zone_damage_map(model, pil_img)
+
+                zc1, zc2 = st.columns(2)
+                with zc1:
+                    st.markdown("**Original**")
+                    st.image(pil_img, width="stretch")
+                with zc2:
+                    st.markdown("**Damage map**")
+                    st.image(overlay, width="stretch")
+
+                rows, cols = stats["grid_shape"]
+                dmg = stats["damage_pct"]
+                dmg_color = "#1D9E75" if dmg == 0 else ("#EAB308" if dmg < 50 else "#E24B4A")
+                st.markdown(
+                    f"""
+                    <div class="card">
+                      <div style="font-size:1.15rem; font-weight:700;">
+                        <span style="color:{dmg_color};">{dmg:.0f}% of zones show damage</span>
+                        &nbsp;·&nbsp; {stats['n_damage']} / {stats['n_tiles']} tiles
+                        &nbsp;·&nbsp; grid {rows}×{cols}
+                      </div>
+                    </div>
+                    """,
+                    unsafe_allow_html=True,
+                )
+
+                # Legend + per-class tile counts
+                legend_html = '<div class="card"><b>Legend &amp; zone counts</b><br/>'
+                for cls in CLASS_NAMES:
+                    cnt = stats["class_counts"][cls]
+                    legend_html += (
+                        f'<div class="legend-row">'
+                        f'<span class="legend-swatch" style="background:{CLASS_COLORS[cls]};"></span>'
+                        f'<span>{CLASS_EMOJI[cls]} <b>{cls}</b> — {cnt} zone(s)</span></div>'
+                    )
+                legend_html += "</div>"
+                st.markdown(legend_html, unsafe_allow_html=True)
+
+            except Exception as exc:  # pragma: no cover - defensive UI guard
+                st.error(f"Zone analysis failed for this image: {exc}")
+
+# ════════════════════════════════════════════════════════════════════════
+# TAB 3 — MODEL PERFORMANCE
+# ════════════════════════════════════════════════════════════════════════
+with tab_perf:
+    st.markdown("#### 📊 Model Performance")
+
+    metrics = [
+        ("97%", "Overall Accuracy"),
+        ("96%", "Macro F1"),
+        ("96.94%", "Best Val Accuracy"),
+        ("15 + 8", "Epochs (P1 + P2)"),
+        ("16,723", "Images · 4 classes"),
+    ]
+    mcols = st.columns(len(metrics))
+    for col, (val, lbl) in zip(mcols, metrics):
+        col.markdown(
+            f'<div class="metric-card"><div class="val">{val}</div>'
+            f'<div class="lbl">{lbl}</div></div>',
+            unsafe_allow_html=True,
+        )
+
+    st.markdown("")
+    pc1, pc2 = st.columns(2)
+    with pc1:
+        st.markdown("**Training curves**")
+        curves = os.path.join(OUT_DIR, "B0_curves.png")
+        if os.path.isfile(curves):
+            st.image(curves, width="stretch")
+        else:
+            st.info("`outputs/B0_curves.png` not found — run notebook 02.")
+    with pc2:
+        st.markdown("**Confusion matrix (test set)**")
+        cm = os.path.join(OUT_DIR, "B0_confusion.png")
+        if os.path.isfile(cm):
+            st.image(cm, width="stretch")
+        else:
+            st.info("`outputs/B0_confusion.png` not found — run notebook 02.")
+
+    st.markdown("**Classification report (test set)**")
+    report_path = os.path.join(OUT_DIR, "B0_report.txt")
+    if os.path.isfile(report_path):
+        try:
+            import pandas as pd
+            with open(report_path) as f:
+                report_txt = f.read()
+            rows = []
+            for line in report_txt.strip().splitlines():
+                parts = line.split()
+                if not parts or parts[0] == "precision":
+                    continue
+                if parts[0] == "accuracy":
+                    rows.append(["accuracy", "", "", parts[1], parts[2]])
+                elif parts[0] in ("macro", "weighted"):
+                    rows.append([f"{parts[0]} avg", parts[2], parts[3], parts[4], parts[5]])
+                else:
+                    rows.append([parts[0], parts[1], parts[2], parts[3], parts[4]])
+            df_report = pd.DataFrame(rows, columns=["Class", "Precision", "Recall", "F1", "Support"])
+            st.dataframe(df_report, width="stretch", hide_index=True)
+        except Exception as exc:
+            st.info(f"Could not parse classification report: {exc}")
+            st.text(report_txt)
+    else:
+        st.info("`outputs/B0_report.txt` not found — run notebook 02.")
+
+    st.markdown("**Model comparison**")
+    comp_path = os.path.join(OUT_DIR, "model_comparison.csv")
+    if os.path.isfile(comp_path):
+        try:
+            import pandas as pd
+            df_comp = pd.read_csv(comp_path)
+            st.dataframe(df_comp, width="stretch", hide_index=True)
+        except Exception as exc:
+            st.info(f"Could not read model comparison: {exc}")
+    else:
+        st.info("`outputs/model_comparison.csv` not found — run notebook 02.")
+    st.caption(
+        "ℹ️ EfficientNetB1 and B3 were skipped due to CPU-only training "
+        "constraints — B0 already reaches 97% test accuracy, so the extra "
+        "wall-clock cost of the larger backbones wasn't justified for this project."
+    )
