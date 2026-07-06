@@ -46,78 +46,208 @@ st.set_page_config(
 # ── Custom CSS ──────────────────────────────────────────────────────────
 CUSTOM_CSS = """
 <style>
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap');
+
 :root {
+  /* Class colors — mirror utils/zonemap.CLASS_COLORS so the whole app
+     (badge, chart, zone legend, and overlay tiles) stays consistent. */
   --eq: #E24B4A; --fire: #EF9F27; --flood: #378ADD; --normal: #1D9E75;
+  /* Sophisticated slate palette */
+  --bg-0: #0f172a; --bg-1: #131c31; --bg-2: #1a2438;
+  --border: #26324a; --border-hi: #33415c;
+  --text-hi: #f1f5f9; --text: #cbd5e1; --text-mut: #94a3b8;
+  --accent: #60a5fa; --accent-2: #3b82f6;
 }
-.block-container { padding-top: 1.2rem; max-width: 1300px; }
 
-/* Gradient header banner */
+/* Global typography */
+html, body, [class*="css"], .stMarkdown, .stApp {
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+}
+.stApp { background: radial-gradient(1200px 600px at 15% -10%, #16223c 0%, var(--bg-0) 55%); }
+.block-container { padding-top: 1.4rem; max-width: 1320px; }
+
+h1, h2, h3, h4 { font-family: 'Inter', sans-serif; letter-spacing: -0.01em; }
+.stMarkdown h4 { font-weight: 700; color: var(--text-hi); margin-top: 0.2rem; }
+
+/* ── Hero header ───────────────────────────────────────────────────── */
 .hero {
-  background: linear-gradient(120deg, #10203f 0%, #1c3a63 45%, #2a5c8f 100%);
-  border-radius: 16px; padding: 22px 28px; margin-bottom: 18px;
-  border: 1px solid rgba(255,255,255,0.08);
-  box-shadow: 0 8px 30px rgba(0,0,0,0.35);
+  position: relative; overflow: hidden;
+  background:
+    linear-gradient(125deg, #0b1220 0%, #14264a 48%, #1e3a63 100%);
+  border-radius: 20px; padding: 30px 34px; margin-bottom: 22px;
+  border: 1px solid rgba(96,165,250,0.16);
+  box-shadow: 0 12px 40px rgba(0,0,0,0.45), inset 0 1px 0 rgba(255,255,255,0.05);
+  animation: heroIn 0.5s cubic-bezier(.22,.61,.36,1) both;
 }
-.hero h1 { color: #ffffff; margin: 0; font-size: 1.9rem; font-weight: 800;
-  letter-spacing: 0.3px; }
-.hero p { color: #b9c6da; margin: 4px 0 0 0; font-size: 0.95rem; }
-.hero .badges { margin-top: 12px; }
+/* Subtle dot-grid texture overlay for depth */
+.hero::before {
+  content: ""; position: absolute; inset: 0; pointer-events: none;
+  background-image: radial-gradient(rgba(255,255,255,0.05) 1px, transparent 1px);
+  background-size: 22px 22px; opacity: 0.6;
+  -webkit-mask-image: linear-gradient(105deg, #000 0%, transparent 70%);
+          mask-image: linear-gradient(105deg, #000 0%, transparent 70%);
+}
+/* Soft glow accent in the corner */
+.hero::after {
+  content: ""; position: absolute; top: -60px; right: -40px;
+  width: 260px; height: 260px; border-radius: 50%; pointer-events: none;
+  background: radial-gradient(circle, rgba(96,165,250,0.28) 0%, transparent 70%);
+  filter: blur(8px);
+}
+.hero h1 { color: #fff; margin: 0; font-size: 2.1rem; font-weight: 800;
+  letter-spacing: -0.02em; position: relative; z-index: 1; }
+.hero p { color: #b9c6da; margin: 6px 0 0 0; font-size: 0.97rem;
+  position: relative; z-index: 1; }
+.hero .badges { margin-top: 16px; position: relative; z-index: 1; }
 .hero .pill {
-  display: inline-block; background: rgba(255,255,255,0.10);
-  border: 1px solid rgba(255,255,255,0.18); color: #eaf1fb;
-  padding: 5px 12px; border-radius: 999px; font-size: 0.8rem;
-  margin-right: 8px; font-weight: 600;
+  display: inline-block; background: rgba(255,255,255,0.07);
+  border: 1px solid rgba(255,255,255,0.16); color: #eaf1fb;
+  padding: 6px 14px; border-radius: 999px; font-size: 0.8rem;
+  margin: 0 8px 8px 0; font-weight: 600; letter-spacing: 0.01em;
+  backdrop-filter: blur(6px); transition: all 0.25s ease;
+}
+.hero .pill:hover { border-color: rgba(96,165,250,0.5);
+  background: rgba(96,165,250,0.12); }
+/* Accuracy badge — accent gradient with animated shimmer + glow */
+.hero .pill.accent {
+  position: relative; overflow: hidden; color: #fff; border: none;
+  background: linear-gradient(120deg, var(--normal) 0%, #0ea371 100%);
+  box-shadow: 0 0 0 1px rgba(16,185,129,0.4), 0 0 18px rgba(16,185,129,0.35);
+  animation: pulseGlow 2.6s ease-in-out infinite;
+}
+.hero .pill.accent::after {
+  content: ""; position: absolute; top: 0; left: -60%; width: 50%; height: 100%;
+  background: linear-gradient(100deg, transparent, rgba(255,255,255,0.45), transparent);
+  transform: skewX(-20deg); animation: shimmer 3.2s ease-in-out infinite;
+}
+@keyframes heroIn { from { opacity: 0; transform: translateY(-10px); } }
+@keyframes pulseGlow {
+  0%, 100% { box-shadow: 0 0 0 1px rgba(16,185,129,0.4), 0 0 14px rgba(16,185,129,0.30); }
+  50% { box-shadow: 0 0 0 1px rgba(16,185,129,0.55), 0 0 24px rgba(16,185,129,0.5); }
+}
+@keyframes shimmer {
+  0% { left: -60%; } 55%, 100% { left: 130%; }
 }
 
-/* Card containers */
+/* ── Card containers (glassmorphism) ───────────────────────────────── */
 .card {
-  background: #161B25; border: 1px solid #262d3a; border-radius: 14px;
-  padding: 18px 20px; box-shadow: 0 4px 18px rgba(0,0,0,0.28);
-  margin-bottom: 14px;
+  background: linear-gradient(180deg, rgba(26,36,56,0.72) 0%, rgba(19,28,49,0.72) 100%);
+  backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
+  border: 1px solid var(--border); border-radius: 16px;
+  padding: 18px 22px; box-shadow: 0 6px 22px rgba(0,0,0,0.30);
+  margin-bottom: 16px; transition: transform 0.25s ease, box-shadow 0.25s ease,
+    border-color 0.25s ease;
+}
+.card:hover {
+  transform: translateY(-3px); border-color: var(--border-hi);
+  box-shadow: 0 12px 32px rgba(0,0,0,0.42);
 }
 .card h3 { margin-top: 0; }
 
-/* Severity badge */
+/* ── Severity / prediction badge ───────────────────────────────────── */
 .sev-badge {
-  display: flex; align-items: center; gap: 12px;
-  border-radius: 12px; padding: 16px 20px; margin: 4px 0 14px 0;
+  position: relative; overflow: hidden;
+  display: flex; align-items: center; gap: 16px;
+  border-radius: 16px; padding: 20px 24px; margin: 4px 0 16px 0;
   color: #fff; font-weight: 800;
+  box-shadow: 0 8px 26px rgba(0,0,0,0.35);
+  animation: fadeUp 0.4s cubic-bezier(.22,.61,.36,1) both;
 }
-.sev-badge .emoji { font-size: 2.2rem; }
-.sev-badge .label { font-size: 1.7rem; line-height: 1.1; }
-.sev-badge .sub { font-size: 0.85rem; font-weight: 500; opacity: 0.9; }
+.sev-badge::after {
+  content: ""; position: absolute; top: -40px; right: -20px;
+  width: 150px; height: 150px; border-radius: 50%;
+  background: radial-gradient(circle, rgba(255,255,255,0.22) 0%, transparent 70%);
+  pointer-events: none;
+}
+.sev-badge .emoji { font-size: 2.5rem; position: relative; z-index: 1;
+  filter: drop-shadow(0 2px 4px rgba(0,0,0,0.3)); }
+.sev-badge .label { font-size: 1.85rem; line-height: 1.1; position: relative;
+  z-index: 1; letter-spacing: -0.01em; }
+.sev-badge .sub { font-size: 0.86rem; font-weight: 500; opacity: 0.92;
+  position: relative; z-index: 1; }
 
-/* Animated confidence meter */
-.meter-wrap { background:#0e1117; border:1px solid #262d3a; border-radius:999px;
-  height: 26px; width: 100%; overflow: hidden; margin: 6px 0 2px 0; }
+/* ── Animated confidence meter ─────────────────────────────────────── */
+.meter-wrap { background: var(--bg-0); border: 1px solid var(--border);
+  border-radius: 999px; height: 28px; width: 100%; overflow: hidden;
+  margin: 6px 0 2px 0; box-shadow: inset 0 1px 3px rgba(0,0,0,0.4); }
 .meter-fill { height: 100%; border-radius: 999px; text-align: right;
-  color: #fff; font-weight: 700; font-size: 0.8rem; line-height: 26px;
-  padding-right: 10px; white-space: nowrap;
-  animation: growbar 0.9s cubic-bezier(.22,.61,.36,1) forwards; }
-@keyframes growbar { from { width: 0%; } }
+  color: #fff; font-weight: 700; font-size: 0.8rem; line-height: 28px;
+  padding-right: 12px; white-space: nowrap;
+  box-shadow: 0 0 12px rgba(255,255,255,0.12);
+  animation: growbar 1.0s cubic-bezier(.22,.61,.36,1) forwards; }
+@keyframes growbar { from { width: 0% !important; } }
 
-/* Metric cards */
+/* ── Metric cards ──────────────────────────────────────────────────── */
 .metric-card {
-  background: #161B25; border: 1px solid #262d3a; border-radius: 14px;
-  padding: 16px 18px; text-align: center; height: 100%;
+  position: relative; overflow: hidden;
+  background: linear-gradient(180deg, rgba(26,36,56,0.72) 0%, rgba(19,28,49,0.72) 100%);
+  backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
+  border: 1px solid var(--border); border-radius: 16px;
+  padding: 18px 16px; text-align: center; height: 100%;
+  transition: transform 0.25s ease, box-shadow 0.25s ease, border-color 0.25s ease;
+  animation: fadeUp 0.5s cubic-bezier(.22,.61,.36,1) both;
 }
-.metric-card .val { font-size: 1.7rem; font-weight: 800; color: #eaf1fb; }
-.metric-card .lbl { font-size: 0.8rem; color: #8b97a8; margin-top: 2px;
-  text-transform: uppercase; letter-spacing: 0.5px; }
+.metric-card::before {
+  content: ""; position: absolute; top: 0; left: 0; right: 0; height: 3px;
+  background: linear-gradient(90deg, var(--accent-2), var(--accent));
+}
+.metric-card:hover { transform: translateY(-3px); border-color: var(--border-hi);
+  box-shadow: 0 12px 30px rgba(0,0,0,0.42); }
+.metric-card .val { font-size: 1.9rem; font-weight: 800;
+  background: linear-gradient(120deg, #eaf1fb, #9dc2ff);
+  -webkit-background-clip: text; background-clip: text;
+  -webkit-text-fill-color: transparent; line-height: 1.15; }
+.metric-card .lbl { font-size: 0.76rem; color: var(--text-mut); margin-top: 4px;
+  text-transform: uppercase; letter-spacing: 0.06em; font-weight: 600; }
 
-/* Sample image buttons -> card-like with hover lift */
+/* ── Sidebar polish ────────────────────────────────────────────────── */
 section[data-testid="stSidebar"] div.stButton > button {
-  border-radius: 10px; border: 1px solid #2c3442; background: #1a212e;
-  font-weight: 600; transition: all 0.15s ease-in-out; padding: 10px 6px;
+  border-radius: 12px; border: 1px solid var(--border);
+  background: linear-gradient(180deg, rgba(30,41,66,0.9), rgba(21,30,52,0.9));
+  font-weight: 600; transition: all 0.22s cubic-bezier(.22,.61,.36,1);
+  padding: 11px 6px;
 }
 section[data-testid="stSidebar"] div.stButton > button:hover {
-  transform: translateY(-2px); border-color: #5B8DEF;
-  box-shadow: 0 6px 16px rgba(91,141,239,0.25);
+  transform: translateY(-2px); border-color: var(--accent);
+  box-shadow: 0 8px 18px rgba(96,165,250,0.28);
+  background: linear-gradient(180deg, rgba(37,52,84,0.95), rgba(26,37,64,0.95));
+}
+section[data-testid="stSidebar"] div.stButton > button:active { transform: translateY(0); }
+
+/* Primary action buttons in main area */
+div[data-testid="stMainBlockContainer"] div.stButton > button,
+.stDownloadButton > button {
+  border-radius: 12px; transition: all 0.22s cubic-bezier(.22,.61,.36,1);
+}
+div[data-testid="stMainBlockContainer"] div.stButton > button:hover,
+.stDownloadButton > button:hover {
+  transform: translateY(-2px); box-shadow: 0 8px 20px rgba(59,130,246,0.28);
 }
 
-.legend-row { display:flex; align-items:center; gap:8px; margin: 3px 0; }
-.legend-swatch { width:16px; height:16px; border-radius:4px; display:inline-block; }
-.explain { color:#8b97a8; font-size:0.85rem; }
+/* Tabs */
+button[data-testid="stTab"], .stTabs [data-baseweb="tab"] {
+  font-weight: 600; letter-spacing: 0.01em;
+}
+
+/* Fade-in for images / results */
+div[data-testid="stImage"] { animation: fadeUp 0.5s ease both; }
+
+/* ── Shared bits ───────────────────────────────────────────────────── */
+.legend-row { display:flex; align-items:center; gap:10px; margin: 5px 0; }
+.legend-swatch { width:18px; height:18px; border-radius:5px; display:inline-block;
+  box-shadow: 0 0 8px rgba(0,0,0,0.35); }
+.explain { color: var(--text-mut); font-size:0.86rem; line-height: 1.55; }
+
+/* Key/value rows in sidebar model card */
+.kv { display:flex; justify-content:space-between; align-items:center;
+  padding: 5px 0; border-bottom: 1px solid rgba(255,255,255,0.05); font-size: 0.86rem; }
+.kv:last-child { border-bottom: none; }
+.kv b { color: var(--text-hi); font-weight: 700; }
+
+@keyframes fadeUp { from { opacity: 0; transform: translateY(8px); } }
+
+/* Custom loading spinner tint */
+.stSpinner > div { border-top-color: var(--accent) !important; }
 </style>
 """
 st.markdown(CUSTOM_CSS, unsafe_allow_html=True)
@@ -200,7 +330,7 @@ st.markdown(
         <h1>🛰️ Disaster Severity Assessment</h1>
         <p>Explainable aerial-image disaster classification &mdash; Team Anuksha &middot; Rishika &middot; Ipshita &middot; C-DAC Mohali</p>
         <div class="badges">
-            <span class="pill">97% Test Accuracy</span>
+            <span class="pill accent">✦ 97% Test Accuracy</span>
             <span class="pill">AIDERv2</span>
             <span class="pill">EfficientNetB0</span>
             <span class="pill">Grad-CAM + Grad-CAM++</span>
@@ -235,12 +365,15 @@ with st.sidebar:
 
     st.markdown(
         f"""
-        <div class="card" style="padding:14px 16px;">
-            <div style="font-weight:700; margin-bottom:6px;">Model</div>
-            <div class="explain">Variant &nbsp;<b style="color:#eaf1fb;">EfficientNet{variant}</b></div>
-            <div class="explain">Params &nbsp;<b style="color:#eaf1fb;">{num_params:,}</b></div>
-            <div class="explain">Input &nbsp;<b style="color:#eaf1fb;">{input_size[0]}×{input_size[1]}</b></div>
-            <div class="explain">Val acc &nbsp;<b style="color:#1D9E75;">96.94%</b></div>
+        <div class="card" style="padding:16px 18px; border-left:3px solid var(--accent-2);">
+            <div style="font-weight:700; margin-bottom:10px; color:var(--text-hi);
+                 text-transform:uppercase; letter-spacing:0.06em; font-size:0.78rem;">
+                 Model Info</div>
+            <div class="kv"><span class="explain">Variant</span><b>EfficientNet{variant}</b></div>
+            <div class="kv"><span class="explain">Params</span><b>{num_params:,}</b></div>
+            <div class="kv"><span class="explain">Input</span><b>{input_size[0]}×{input_size[1]}</b></div>
+            <div class="kv"><span class="explain">Val accuracy</span>
+                 <b style="color:var(--normal);">96.94%</b></div>
         </div>
         """,
         unsafe_allow_html=True,
@@ -341,14 +474,24 @@ with tab_analyze:
                 bar_colors = [CLASS_COLORS.get(k, "#5B8DEF") for k in probs.keys()]
                 fig = go.Figure(go.Bar(
                     x=list(probs.values()), y=list(probs.keys()), orientation="h",
-                    marker_color=bar_colors,
+                    marker=dict(
+                        color=bar_colors, cornerradius=8,
+                        line=dict(color="rgba(255,255,255,0.08)", width=1),
+                    ),
                     text=[f"{v:.1%}" for v in probs.values()], textposition="outside",
+                    textfont=dict(size=13, color="#e2e8f0",
+                                  family="Inter, sans-serif"),
+                    hovertemplate="%{y}: %{x:.1%}<extra></extra>",
                 ))
                 fig.update_layout(
-                    template="plotly_dark", xaxis=dict(range=[0, 1.05], tickformat=".0%"),
-                    height=230, margin=dict(t=10, b=10, l=10, r=10),
+                    template="plotly_dark", xaxis=dict(range=[0, 1.08], tickformat=".0%"),
+                    height=240, margin=dict(t=10, b=10, l=10, r=10),
                     paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
+                    font=dict(family="Inter, sans-serif", color="#cbd5e1"),
+                    bargap=0.35,
                 )
+                fig.update_yaxes(showgrid=False)
+                fig.update_xaxes(gridcolor="rgba(255,255,255,0.06)")
                 st.plotly_chart(fig, width="stretch")
 
             st.markdown("---")
