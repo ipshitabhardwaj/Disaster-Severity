@@ -1,32 +1,36 @@
-# Core ML
-tensorflow
-keras
-scikit-learn
+# Project43 — Disaster Severity Assessment
+# Pinned to versions verified via `pip freeze` (Python 3.10, Windows).
+# Only packages actually imported by app/, utils/, and notebooks/ are listed,
+# plus a few key transitive deps that cause version conflicts if mismatched.
 
-# Image processing
-opencv-python
-Pillow
-numpy
+# ── Core ML ──────────────────────────────────────────────────────────────
+tensorflow==2.21.0        # tf, tf.keras, EfficientNet, preprocess_input
+keras==3.12.3             # backs tensorflow.keras in TF 2.21 (separate wheel)
+scikit-learn==1.4.2       # sklearn.metrics (classification_report, confusion_matrix)
+h5py==3.14.0              # required to load models/best_model.h5
 
-# Data handling
-pandas
+# ── Image processing ─────────────────────────────────────────────────────
+opencv-python==4.13.0.92  # cv2 — Grad-CAM heatmap colormaps / overlay
+pillow==10.4.0            # PIL.Image — image I/O and tiling
+numpy==2.2.6              # arrays everywhere
 
-# Visualization
-matplotlib
-seaborn
-plotly
+# ── Data handling ────────────────────────────────────────────────────────
+pandas==2.2.2             # classification report / model-comparison tables
 
-# Dashboard
-streamlit
+# ── Visualization ────────────────────────────────────────────────────────
+matplotlib==3.8.4         # Grad-CAM gallery figures, training curves
+seaborn==0.13.2           # confusion-matrix heatmaps (notebooks 02/03)
+plotly==6.7.0             # plotly.graph_objects — dashboard probability bars
 
-# Explainability
-tf-keras-vis
+# ── Dashboard ────────────────────────────────────────────────────────────
+streamlit==1.56.0         # app/app.py UI
 
-# PDF export
-fpdf2
+# ── PDF export ───────────────────────────────────────────────────────────
+fpdf2==2.8.7              # fpdf.FPDF — utils/report.py
 
-# Jupyter
-jupyter
-notebook
-ipykernel
-nbconvert
+# ── Misc ─────────────────────────────────────────────────────────────────
+absl-py==2.4.0            # absl.logging — notebooks 03/04
+
+# ── Key transitive deps (pinned to avoid conflicts) ──────────────────────
+protobuf==7.35.1          # tensorflow serialization backend
+scipy==1.15.3             # scikit-learn / seaborn numeric backend
