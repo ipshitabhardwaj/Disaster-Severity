@@ -10,7 +10,7 @@ scikit-learn==1.4.2       # sklearn.metrics (classification_report, confusion_ma
 h5py==3.14.0              # required to load models/best_model.h5
 
 # ── Image processing ─────────────────────────────────────────────────────
-opencv-python==4.13.0.92  # cv2 — Grad-CAM heatmap colormaps / overlay
+opencv-python-headless==4.13.0.92  # cv2 — Grad-CAM heatmap colormaps / overlay
 pillow==10.4.0            # PIL.Image — image I/O and tiling
 numpy==2.2.6              # arrays everywhere
 
