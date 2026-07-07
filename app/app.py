@@ -12,10 +12,12 @@ intentionally left untouched so badges, charts, zone tiles, and the PDF all
 agree.
 """
 
+import hashlib
 import io
 import os
 import sys
 import tempfile
+from datetime import datetime
 
 import numpy as np
 import plotly.graph_objects as go
@@ -241,6 +243,38 @@ div[data-testid="stMainBlockContainer"] div.stButton > button:hover,
 .kv span { color: var(--text-dim); }
 
 .stSpinner > div { border-top-color: var(--signal) !important; }
+
+/* ── Session log rows (sidebar) ─────────────────────────────────────── */
+.log-row {
+  display: flex; align-items: center; gap: 8px; padding: 6px 0;
+  border-bottom: 1px solid rgba(255,255,255,0.05); font-size: 0.78rem;
+}
+.log-row:last-child { border-bottom: none; }
+.log-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+.log-row .log-cls { color: var(--text-hi); font-weight: 600; font-family: 'IBM Plex Mono', monospace; }
+.log-row .log-meta { color: var(--text-dim); margin-left: auto; font-family: 'IBM Plex Mono', monospace; font-size: 0.72rem; }
+.log-empty { color: var(--text-dim); font-size: 0.8rem; padding: 4px 0; }
+
+/* ── Metadata chip strip (image dimensions / size / format) ──────────── */
+.meta-strip { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 8px; }
+.meta-chip {
+  font-family: 'IBM Plex Mono', monospace; font-size: 0.72rem; color: var(--text);
+  background: var(--panel); border: 1px solid var(--line); border-radius: 6px;
+  padding: 5px 9px;
+}
+.meta-chip b { color: var(--text-hi); }
+
+/* ── Executive summary card ───────────────────────────────────────────── */
+.summary-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-top: 6px; }
+.summary-item {
+  background: var(--panel); border: 1px solid var(--line); border-radius: 8px;
+  padding: 12px 14px;
+}
+.summary-item .lbl {
+  font-size: 0.68rem; color: var(--text-dim); text-transform: uppercase;
+  letter-spacing: 0.06em; font-weight: 600; margin-bottom: 4px;
+}
+.summary-item .val { font-family: 'IBM Plex Mono', monospace; font-size: 1.15rem; font-weight: 700; color: var(--text-hi); }
 </style>
 """
 st.markdown(CUSTOM_CSS, unsafe_allow_html=True)
@@ -278,6 +312,93 @@ def confidence_meter_html(confidence: float) -> str:
         </div>
         <div class="meter-ticks"><span></span><span></span><span></span><span></span></div>
     </div>"""
+
+
+def img_hash(image_bytes: bytes) -> str:
+    """Short stable id for an image, used to key session history / zone stats."""
+    return hashlib.sha1(image_bytes).hexdigest()[:10]
+
+
+def image_metadata_html(image_bytes: bytes) -> str:
+    """Metadata read straight from the raw upload bytes (not `result['original']`,
+    which is a numpy array from predict_and_explain, not a PIL Image)."""
+    with Image.open(io.BytesIO(image_bytes)) as probe:
+        w, h = probe.size
+        fmt = (probe.format or "—").upper()
+    size_kb = len(image_bytes) / 1024
+    aspect = w / h if h else 0
+    return f"""
+    <div class="meta-strip">
+        <span class="meta-chip">Size &middot; <b>{w}&times;{h}</b></span>
+        <span class="meta-chip">File &middot; <b>{size_kb:.0f} KB</b></span>
+        <span class="meta-chip">Aspect &middot; <b>{aspect:.2f}</b></span>
+        <span class="meta-chip">Format &middot; <b>{fmt}</b></span>
+    </div>"""
+
+
+def confidence_donut(confidence: float, color: str):
+    """Small ring chart — confidence vs remainder — sits beside the severity badge."""
+    fig = go.Figure(go.Pie(
+        values=[confidence, max(0.0001, 1 - confidence)],
+        hole=0.72, sort=False, direction="clockwise",
+        marker=dict(colors=[color, "#1a2338"], line=dict(color="#0a0e16", width=2)),
+        textinfo="none", hoverinfo="skip",
+    ))
+    fig.update_layout(
+        showlegend=False, height=140, width=140,
+        margin=dict(t=4, b=4, l=4, r=4),
+        paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
+        annotations=[dict(
+            text=f"{confidence:.0%}", showarrow=False,
+            font=dict(family="IBM Plex Mono, monospace", size=18, color="#eef2f9"),
+        )],
+    )
+    return fig
+
+
+def _hex_to_rgba(hex_color: str, alpha: float) -> str:
+    h = hex_color.lstrip("#")
+    r, g, b = (int(h[i:i + 2], 16) for i in (0, 2, 4))
+    return f"rgba({r},{g},{b},{alpha})"
+
+
+def class_radar(probs: dict, colors: dict):
+    """Spider chart comparing all 4 class probabilities at a glance."""
+    cats = list(probs.keys())
+    vals = list(probs.values())
+    top_color = colors.get(cats[int(np.argmax(vals))], "#48d1c4")
+    fig = go.Figure(go.Scatterpolar(
+        r=vals + [vals[0]], theta=cats + [cats[0]],
+        fill="toself", fillcolor=_hex_to_rgba(top_color, 0.25),
+        line=dict(color=top_color, width=2),
+        marker=dict(size=5, color=top_color),
+        hovertemplate="%{theta}: %{r:.1%}<extra></extra>",
+    ))
+    fig.update_layout(
+        showlegend=False, height=240,
+        margin=dict(t=20, b=20, l=30, r=30),
+        paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
+        polar=dict(
+            bgcolor="rgba(0,0,0,0)",
+            radialaxis=dict(visible=True, range=[0, 1], tickformat=".0%",
+                             tickfont=dict(size=8, color="#5b6780"), gridcolor="#232e46"),
+            angularaxis=dict(tickfont=dict(size=11, color="#a7b2c6", family="IBM Plex Mono, monospace"),
+                              gridcolor="#232e46"),
+        ),
+        font=dict(family="Inter, sans-serif", color="#a7b2c6"),
+    )
+    return fig
+
+
+def log_analysis(image_hash: str, name: str, pred_class: str, confidence: float):
+    """Append an entry to the session history, deduped by image hash."""
+    if st.session_state.history and st.session_state.history[-1]["hash"] == image_hash:
+        return
+    st.session_state.history.append({
+        "hash": image_hash, "name": name, "class": pred_class,
+        "confidence": confidence, "time": datetime.now().strftime("%H:%M:%S"),
+    })
+    st.session_state.history = st.session_state.history[-12:]  # keep it bounded
 
 
 @st.cache_resource(show_spinner=False)
@@ -357,6 +478,10 @@ num_params = model.count_params()
 if "image_bytes" not in st.session_state:
     st.session_state.image_bytes = None
     st.session_state.image_name = None
+if "history" not in st.session_state:
+    st.session_state.history = []          # list of {hash, name, class, confidence, time}
+if "zone_stats" not in st.session_state:
+    st.session_state.zone_stats = {}       # {image_hash: stats dict from zone_damage_map}
 
 # ── Sidebar ─────────────────────────────────────────────────────────────
 with st.sidebar:
@@ -416,6 +541,23 @@ with st.sidebar:
             "_C-DAC Mohali — ML to Generative AI & LLMs._"
         )
 
+    st.markdown("---")
+    st.markdown('<div class="eyebrow">Session Log</div>', unsafe_allow_html=True)
+    if not st.session_state.history:
+        log_rows = '<div class="log-empty">No images analyzed yet this session.</div>'
+    else:
+        log_rows = ""
+        for entry in reversed(st.session_state.history):
+            dot = CLASS_COLORS.get(entry["class"], "#5B8DEF")
+            log_rows += (
+                f'<div class="log-row">'
+                f'<span class="log-dot" style="background:{dot};"></span>'
+                f'<span class="log-cls">{entry["class"]}</span>'
+                f'<span class="log-meta">{entry["confidence"]:.0%} &middot; {entry["time"]}</span>'
+                f'</div>'
+            )
+    st.markdown(f'<div class="card bracket">{log_rows}</div>', unsafe_allow_html=True)
+
 # ── Uploader (shared across tabs) ───────────────────────────────────────
 st.markdown('<div class="eyebrow">Input Feed</div>', unsafe_allow_html=True)
 uploaded_file = st.file_uploader(
@@ -449,6 +591,9 @@ with tab_analyze:
         if result is not None:
             pred_class = result["class"]
             confidence = result["confidence"]
+            current_hash = img_hash(image_bytes)
+            log_analysis(current_hash, st.session_state.image_name or "uploaded image",
+                         pred_class, confidence)
 
             left, right = st.columns([1, 1.15])
 
@@ -456,10 +601,20 @@ with tab_analyze:
                 st.markdown('<div class="eyebrow">Input</div>', unsafe_allow_html=True)
                 st.image(result["original"], width="stretch",
                          caption=st.session_state.image_name or "uploaded image")
+                st.markdown(image_metadata_html(image_bytes),
+                            unsafe_allow_html=True)
 
             with right:
                 st.markdown('<div class="eyebrow">Classification</div>', unsafe_allow_html=True)
-                st.markdown(severity_badge_html(pred_class, confidence), unsafe_allow_html=True)
+                badge_col, donut_col = st.columns([2.1, 1])
+                with badge_col:
+                    st.markdown(severity_badge_html(pred_class, confidence), unsafe_allow_html=True)
+                with donut_col:
+                    st.plotly_chart(
+                        confidence_donut(confidence, CLASS_COLORS.get(pred_class, "#48d1c4")),
+                        width="stretch", config={"displayModeBar": False},
+                    )
+
                 st.markdown("**Confidence**")
                 st.markdown(confidence_meter_html(confidence), unsafe_allow_html=True)
 
@@ -468,7 +623,11 @@ with tab_analyze:
                 else:
                     st.success("✅ Confident prediction.")
 
-                probs = result["all_probs"]
+            probs = result["all_probs"]
+            st.markdown('<div class="eyebrow" style="margin-top:14px;">Class Probability Breakdown</div>',
+                        unsafe_allow_html=True)
+            bar_col, radar_col = st.columns([1.3, 1])
+            with bar_col:
                 bar_colors = [CLASS_COLORS.get(k, "#5B8DEF") for k in probs.keys()]
                 fig = go.Figure(go.Bar(
                     x=list(probs.values()), y=list(probs.keys()), orientation="h",
@@ -490,6 +649,34 @@ with tab_analyze:
                 fig.update_yaxes(showgrid=False)
                 fig.update_xaxes(gridcolor="rgba(255,255,255,0.06)")
                 st.plotly_chart(fig, width="stretch")
+            with radar_col:
+                st.plotly_chart(class_radar(probs, CLASS_COLORS), width="stretch",
+                                config={"displayModeBar": False})
+
+            # ── Executive summary — pulls in Zone Map stats if that tab has
+            # already been run for this exact image (keyed by content hash). ──
+            st.markdown('<div class="eyebrow" style="margin-top:6px;">Executive Summary</div>',
+                        unsafe_allow_html=True)
+            zstats = st.session_state.zone_stats.get(current_hash)
+            zone_val = f"{zstats['damage_pct']:.0f}%" if zstats else "—"
+            zone_lbl = "Zone Damage" if zstats else "Zone Damage (run Zone Map)"
+            st.markdown(
+                f"""
+                <div class="card bracket">
+                  <div class="summary-grid">
+                    <div class="summary-item"><div class="lbl">Predicted Class</div>
+                        <div class="val" style="color:{CLASS_COLORS.get(pred_class,'#eef2f9')};">{pred_class}</div></div>
+                    <div class="summary-item"><div class="lbl">Confidence</div>
+                        <div class="val">{confidence:.1%}</div></div>
+                    <div class="summary-item"><div class="lbl">Grad-CAM Avg Drop</div>
+                        <div class="val">{result['average_drop']:.1f}%</div></div>
+                    <div class="summary-item"><div class="lbl">{zone_lbl}</div>
+                        <div class="val">{zone_val}</div></div>
+                  </div>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
 
             st.markdown("---")
             st.markdown('<div class="eyebrow">Explainability</div>', unsafe_allow_html=True)
@@ -554,6 +741,7 @@ with tab_zone:
                 pil_img = Image.open(io.BytesIO(image_bytes)).convert("RGB")
                 with st.spinner("Tiling and classifying zones…"):
                     overlay, stats = zone_damage_map(model, pil_img)
+                st.session_state.zone_stats[img_hash(image_bytes)] = stats
 
                 zc1, zc2 = st.columns(2)
                 with zc1:
