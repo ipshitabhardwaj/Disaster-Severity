@@ -1,4 +1,5 @@
 # Project 43 — Explainable Disaster Severity Assessment
+[▶ Watch the demo](/demo_video.mp4)
 
 An aerial-image disaster classifier built on EfficientNet transfer learning,
 paired with Grad-CAM / Grad-CAM++ visual explanations so predictions aren't
